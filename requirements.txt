@@ -1,3 +1,4 @@
 lightning
 setuptools
 typing-extensions
+wandb

@@ -7,12 +7,14 @@
 import os
 
 import lightning as L
+from lightning.pytorch.loggers import WandbLogger
 import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import DataLoader, random_split
 from torchmetrics.functional import accuracy
 from torchvision import transforms
+
 
 # Note - you must have torchvision installed for this example
 from torchvision.datasets import CIFAR10, MNIST
@@ -99,19 +101,11 @@ BATCH_SIZE = 256 if torch.cuda.is_available() else 64
 
 # %%
 class LitModel(L.LightningModule):
-    def __init__(self, channels, width, height, num_classes, hidden_size=64, learning_rate=2e-4):
+    def __init__(self):
         super().__init__()
 
-        # We take in input dimensions as parameters and use those to dynamically build model.
-        self.channels = channels
-        self.width = width
-        self.height = height
-        self.num_classes = num_classes
-        self.hidden_size = hidden_size
-        self.learning_rate = learning_rate
-
-        from resnet_cifar import resnet56, resnet1202
-        self.model = resnet56() #resnet1202()
+        from resnet_cifar import resnet20, resnet56, resnet1202
+        self.model = resnet20() #resnet1202()
 
     def forward(self, x):
         x = self.model(x)
@@ -121,18 +115,20 @@ class LitModel(L.LightningModule):
         x, y = batch
         logits = self(x)
         loss = F.nll_loss(logits, y)
+        self.log("train_loss", loss, prog_bar=True, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
         logits = self(x)
         loss = F.nll_loss(logits, y)
-        # acc = accuracy(logits, y, task="multiclass", num_classes=10)
-        self.log("val_loss", loss, prog_bar=True)
-        # self.log("val_acc", acc, prog_bar=True)
+        
+        acc = torch.sum(torch.argmax(logits, dim=1) == y) / len(y)
+        self.log("val_loss", loss, prog_bar=True, sync_dist=True)
+        self.log("val_acc", acc, prog_bar=True, sync_dist=True)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+        optimizer = torch.optim.Adam(self.parameters())
         return optimizer
 
 # %% [markdown]
@@ -207,11 +203,11 @@ class CIFAR10DataModule(L.LightningDataModule):
 
 # %%
 dm = CIFAR10DataModule()
-model = LitModel(*dm.dims, dm.num_classes, hidden_size=256)
+model = LitModel()
 trainer = L.Trainer(
-    max_epochs=5000,
-    accelerator="auto",
-    devices="auto",
+    accelerator="auto", devices="auto", strategy="auto",
+    logger=WandbLogger(),
+    max_epochs=10,
 )
 trainer.fit(model, dm)
 
